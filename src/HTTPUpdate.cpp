@@ -48,7 +48,7 @@ HTTPUpdate::~HTTPUpdate(void)
 {
 }
 
-HTTPUpdateResult HTTPUpdate::update(WiFiClient& client, const String& url, const String& currentVersion)
+HTTPUpdateResult HTTPUpdate::update(Client& client, const String& url, const String& currentVersion)
 {
     HTTPClient http;
     if(!http.begin(client, url))
@@ -58,7 +58,7 @@ HTTPUpdateResult HTTPUpdate::update(WiFiClient& client, const String& url, const
     return handleUpdate(http, currentVersion, false);
 }
 
-HTTPUpdateResult HTTPUpdate::updateSignedFw(WiFiClient& client, const String& url, char * pubKey, const String& currentVersion)
+HTTPUpdateResult HTTPUpdate::updateSignedFw(Client& client, const String& url, char * pubKey, const String& currentVersion)
 {
     HTTPClient http;
     if(!http.begin(client, url))
@@ -73,7 +73,7 @@ HTTPUpdateResult HTTPUpdate::updateSpiffs(HTTPClient& httpClient, const String& 
     return handleUpdate(httpClient, currentVersion, true);
 }
 
-HTTPUpdateResult HTTPUpdate::updateSpiffs(WiFiClient& client, const String& url, const String& currentVersion)
+HTTPUpdateResult HTTPUpdate::updateSpiffs(Client& client, const String& url, const String& currentVersion)
 {
     HTTPClient http;
     if(!http.begin(client, url))
@@ -89,7 +89,7 @@ HTTPUpdateResult HTTPUpdate::update(HTTPClient& httpClient,
     return handleUpdate(httpClient, currentVersion, false);
 }
 
-HTTPUpdateResult HTTPUpdate::update(WiFiClient& client, const String& host, uint16_t port, const String& uri,
+HTTPUpdateResult HTTPUpdate::update(Client& client, const String& host, uint16_t port, const String& uri,
         const String& currentVersion)
 {
     HTTPClient http;
@@ -301,7 +301,7 @@ HTTPUpdateResult HTTPUpdate::handleUpdate(HTTPClient& http, const String& curren
                     _cbStart();
                 }
 
-                WiFiClient * tcp = http.getStreamPtr();
+                Client * tcp = http.getStreamPtr();
 
 // To do?                WiFiUDP::stopAll();
 // To do?                WiFiClient::stopAllExcept(tcp);
@@ -399,18 +399,20 @@ HTTPUpdateResult HTTPUpdate::handleUpdate(HTTPClient& http, const String& curren
 
 HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, char * pubKey, bool spiffs)
 {
-
     HTTPUpdateResult ret = HTTP_UPDATE_FAILED;
 
+    // The whole header seems to be too big and raises a send header error.
+    // Commented out a couple lines (most of this is not needed anyway)
     // use HTTP/1.0 for update since the update handler not support any transfer Encoding
     http.useHTTP10(true);
-    http.setTimeout(_httpClientTimeout);
+    http.setTimeout(_httpClientTimeout); // setTimeout sets timeout to 8ms
+    http.setFollowRedirects(_followRedirects);
     http.setUserAgent("ESP32-http-Update");
     http.addHeader("Cache-Control", "no-cache");
-    http.addHeader("x-ESP32-STA-MAC", WiFi.macAddress());
-    http.addHeader("x-ESP32-AP-MAC", WiFi.softAPmacAddress());
-    http.addHeader("x-ESP32-free-space", String(ESP.getFreeSketchSpace()));
-    http.addHeader("x-ESP32-sketch-size", String(ESP.getSketchSize()));
+    // http.addHeader("x-ESP32-STA-MAC", WiFi.macAddress());
+    // http.addHeader("x-ESP32-AP-MAC", WiFi.softAPmacAddress());
+    // http.addHeader("x-ESP32-free-space", String(ESP.getFreeSketchSpace()));
+    // http.addHeader("x-ESP32-sketch-size", String(ESP.getSketchSize()));
     String sketchMD5 = ESP.getSketchMD5();
     if(sketchMD5.length() != 0) {
         http.addHeader("x-ESP32-sketch-md5", sketchMD5);
@@ -517,7 +519,7 @@ HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String
                     _cbStart();
                 }
 
-                WiFiClient * tcp = http.getStreamPtr();
+                Client * tcp = http.getStreamPtr();
 
 // To do?                WiFiUDP::stopAll();
 // To do?                WiFiClient::stopAllExcept(tcp);
@@ -574,6 +576,7 @@ HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String
                     if (_cbEnd) {
                         _cbEnd();
                     }
+
                     if(_rebootOnUpdate && !spiffs) {
                         ESP.restart();
                     }

@@ -28,7 +28,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiClient.h>
+#include <Client.h>
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <Update.h>
@@ -85,14 +85,14 @@ public:
         _ledOn = ledOn;
     }
 
-    t_httpUpdate_return update(WiFiClient& client, const String& url, const String& currentVersion = "");
+    t_httpUpdate_return update(Client& client, const String& url, const String& currentVersion = "");
 
-    t_httpUpdate_return updateSignedFw(WiFiClient& client, const String& url, char * pubKey, const String& currentVersion = "");
+    t_httpUpdate_return updateSignedFw(Client& client, const String& url, char * pubKey, const String& currentVersion = "");
 
-    t_httpUpdate_return update(WiFiClient& client, const String& host, uint16_t port, const String& uri = "/",
+    t_httpUpdate_return update(Client& client, const String& host, uint16_t port, const String& uri = "/",
                                const String& currentVersion = "");
 
-    t_httpUpdate_return updateSpiffs(WiFiClient& client, const String& url, const String& currentVersion = "");
+    t_httpUpdate_return updateSpiffs(Client& client, const String& url, const String& currentVersion = "");
 
     t_httpUpdate_return update(HTTPClient& httpClient,
                                const String& currentVersion = "");

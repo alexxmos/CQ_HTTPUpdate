@@ -58,6 +58,16 @@ HTTPUpdateResult HTTPUpdate::update(WiFiClient& client, const String& url, const
     return handleUpdate(http, currentVersion, false);
 }
 
+HTTPUpdateResult HTTPUpdate::updateSignedFw(WiFiClient& client, const String& url, char * pubKey, const String& currentVersion)
+{
+    HTTPClient http;
+    if(!http.begin(client, url))
+    {
+        return HTTP_UPDATE_FAILED;
+    }
+    return handleUpdateSignedFw(http, currentVersion, pubKey, false);
+}
+
 HTTPUpdateResult HTTPUpdate::updateSpiffs(HTTPClient& httpClient, const String& currentVersion)
 {
     return handleUpdate(httpClient, currentVersion, true);
@@ -142,6 +152,8 @@ String HTTPUpdate::getLastErrorString(void)
         return "New Binary Does Not Fit Flash Size";
     case HTTP_UE_NO_PARTITION:
         return "Partition Could Not be Found";
+    case HTTP_MISSING_SIGNATURE:
+        return "Missing Firmware Signature";
     }
 
     return String();
@@ -347,6 +359,221 @@ HTTPUpdateResult HTTPUpdate::handleUpdate(HTTPClient& http, const String& curren
                         _cbEnd();
                     }
 
+                    if(_rebootOnUpdate && !spiffs) {
+                        ESP.restart();
+                    }
+
+                } else {
+                    ret = HTTP_UPDATE_FAILED;
+                    log_e("Update failed\n");
+                }
+            }
+        } else {
+            _lastError = HTTP_UE_SERVER_NOT_REPORT_SIZE;
+            ret = HTTP_UPDATE_FAILED;
+            log_e("Content-Length was 0 or wasn't set by Server?!\n");
+        }
+        break;
+    case HTTP_CODE_NOT_MODIFIED:
+        ///< Not Modified (No updates)
+        ret = HTTP_UPDATE_NO_UPDATES;
+        break;
+    case HTTP_CODE_NOT_FOUND:
+        _lastError = HTTP_UE_SERVER_FILE_NOT_FOUND;
+        ret = HTTP_UPDATE_FAILED;
+        break;
+    case HTTP_CODE_FORBIDDEN:
+        _lastError = HTTP_UE_SERVER_FORBIDDEN;
+        ret = HTTP_UPDATE_FAILED;
+        break;
+    default:
+        _lastError = HTTP_UE_SERVER_WRONG_HTTP_CODE;
+        ret = HTTP_UPDATE_FAILED;
+        log_e("HTTP Code is (%d)\n", code);
+        break;
+    }
+
+    http.end();
+    return ret;
+}
+
+HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, char * pubKey, bool spiffs)
+{
+
+    HTTPUpdateResult ret = HTTP_UPDATE_FAILED;
+
+    // use HTTP/1.0 for update since the update handler not support any transfer Encoding
+    http.useHTTP10(true);
+    http.setTimeout(_httpClientTimeout);
+    http.setUserAgent("ESP32-http-Update");
+    http.addHeader("Cache-Control", "no-cache");
+    http.addHeader("x-ESP32-STA-MAC", WiFi.macAddress());
+    http.addHeader("x-ESP32-AP-MAC", WiFi.softAPmacAddress());
+    http.addHeader("x-ESP32-free-space", String(ESP.getFreeSketchSpace()));
+    http.addHeader("x-ESP32-sketch-size", String(ESP.getSketchSize()));
+    String sketchMD5 = ESP.getSketchMD5();
+    if(sketchMD5.length() != 0) {
+        http.addHeader("x-ESP32-sketch-md5", sketchMD5);
+    }
+    // Add also a SHA256
+    String sketchSHA256 = getSketchSHA256();
+    if(sketchSHA256.length() != 0) {
+      http.addHeader("x-ESP32-sketch-sha256", sketchSHA256);
+    }
+    http.addHeader("x-ESP32-chip-size", String(ESP.getFlashChipSize()));
+    http.addHeader("x-ESP32-sdk-version", ESP.getSdkVersion());
+
+    if(spiffs) {
+        http.addHeader("x-ESP32-mode", "spiffs");
+    } else {
+        http.addHeader("x-ESP32-mode", "sketch");
+    }
+
+    if(currentVersion && currentVersion[0] != 0x00) {
+        http.addHeader("x-ESP32-version", currentVersion);
+    }
+
+    const char * headerkeys[] = { "x-MD5" , "X-Firmware-Signature"};
+    size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
+
+    // track these headers
+    http.collectHeaders(headerkeys, headerkeyssize);
+
+
+    int code = http.GET();
+    int len = http.getSize();
+
+    if(code <= 0) {
+        log_e("HTTP error: %s\n", http.errorToString(code).c_str());
+        _lastError = code;
+        http.end();
+        return HTTP_UPDATE_FAILED;
+    }
+
+
+    log_d("Header read fin.\n");
+    log_d("Server header:\n");
+    log_d(" - code: %d\n", code);
+    log_d(" - len: %d\n", len);
+
+    if(http.hasHeader("x-MD5")) {
+        log_d(" - MD5: %s\n", http.header("x-MD5").c_str());
+    }
+
+    log_d("ESP32 info:\n");
+    log_d(" - free Space: %d\n", ESP.getFreeSketchSpace());
+    log_d(" - current Sketch Size: %d\n", ESP.getSketchSize());
+
+    if(currentVersion && currentVersion[0] != 0x00) {
+        log_d(" - current version: %s\n", currentVersion.c_str() );
+    }
+
+    switch(code) {
+    case HTTP_CODE_OK:  ///< OK (Start Update)
+        if(len > 0) {
+            if (Update.signingKey(pubKey)) {
+                if (!(http.hasHeader("X-Firmware-Signature"))) {
+                    _lastError = HTTP_MISSING_SIGNATURE;
+                    http.end();
+                    return HTTP_UPDATE_FAILED;          
+                }
+                String qlSignature= http.header("X-Firmware-Signature");
+                Update.setSignature((char *)qlSignature.c_str());
+            }
+            else {
+                log_d(">>Public Key Not Present<<\n");
+            }
+            bool startUpdate = true;
+            if(spiffs) {
+                const esp_partition_t* _partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, NULL);
+                if(!_partition){
+                    _lastError = HTTP_UE_NO_PARTITION;
+                    return HTTP_UPDATE_FAILED;
+                }
+
+                if(len > _partition->size) {
+                    log_e("spiffsSize to low (%d) needed: %d\n", _partition->size, len);
+                    startUpdate = false;
+                }
+            } else {
+                int sketchFreeSpace = ESP.getFreeSketchSpace();
+                if(!sketchFreeSpace){
+                    _lastError = HTTP_UE_NO_PARTITION;
+                    return HTTP_UPDATE_FAILED;
+                }
+
+                if(len > sketchFreeSpace) {
+                    log_e("FreeSketchSpace to low (%d) needed: %d\n", sketchFreeSpace, len);
+                    startUpdate = false;
+                }
+            }
+
+            if(!startUpdate) {
+                _lastError = HTTP_UE_TOO_LESS_SPACE;
+                ret = HTTP_UPDATE_FAILED;
+            } else {
+                // Warn main app we're starting up...
+                if (_cbStart) {
+                    _cbStart();
+                }
+
+                WiFiClient * tcp = http.getStreamPtr();
+
+// To do?                WiFiUDP::stopAll();
+// To do?                WiFiClient::stopAllExcept(tcp);
+
+                delay(100);
+
+                int command;
+
+                if(spiffs) {
+                    command = U_SPIFFS;
+                    log_d("runUpdate spiffs...\n");
+                } else {
+                    command = U_FLASH;
+                    log_d("runUpdate flash...\n");
+                }
+
+                if(!spiffs) {
+/* To do
+                    uint8_t buf[4];
+                    if(tcp->peekBytes(&buf[0], 4) != 4) {
+                        log_e("peekBytes magic header failed\n");
+                        _lastError = HTTP_UE_BIN_VERIFY_HEADER_FAILED;
+                        http.end();
+                        return HTTP_UPDATE_FAILED;
+                    }
+*/
+
+                    // check for valid first magic byte
+//                    if(buf[0] != 0xE9) {
+                    if(tcp->peek() != 0xE9) {
+                        log_e("Magic header does not start with 0xE9\n");
+                        _lastError = HTTP_UE_BIN_VERIFY_HEADER_FAILED;
+                        http.end();
+                        return HTTP_UPDATE_FAILED;
+
+                    }
+/* To do
+                    uint32_t bin_flash_size = ESP.magicFlashChipSize((buf[3] & 0xf0) >> 4);
+
+                    // check if new bin fits to SPI flash
+                    if(bin_flash_size > ESP.getFlashChipRealSize()) {
+                        log_e("New binary does not fit SPI Flash size\n");
+                        _lastError = HTTP_UE_BIN_FOR_WRONG_FLASH;
+                        http.end();
+                        return HTTP_UPDATE_FAILED;
+                    }
+*/
+                }
+                if(runUpdate(*tcp, len, http.header("x-MD5"), command)) {
+                    ret = HTTP_UPDATE_OK;
+                    log_d("Update ok\n");
+                    http.end();
+                    // Warn main app we're all done
+                    if (_cbEnd) {
+                        _cbEnd();
+                    }
                     if(_rebootOnUpdate && !spiffs) {
                         ESP.restart();
                     }

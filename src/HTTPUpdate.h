@@ -43,6 +43,7 @@
 #define HTTP_UE_BIN_VERIFY_HEADER_FAILED    (-106)
 #define HTTP_UE_BIN_FOR_WRONG_FLASH         (-107)
 #define HTTP_UE_NO_PARTITION                (-108)
+#define HTTP_MISSING_SIGNATURE              (-109)
 
 enum HTTPUpdateResult {
     HTTP_UPDATE_FAILED,
@@ -86,6 +87,8 @@ public:
 
     t_httpUpdate_return update(WiFiClient& client, const String& url, const String& currentVersion = "");
 
+    t_httpUpdate_return updateSignedFw(WiFiClient& client, const String& url, char * pubKey, const String& currentVersion = "");
+
     t_httpUpdate_return update(WiFiClient& client, const String& host, uint16_t port, const String& uri = "/",
                                const String& currentVersion = "");
 
@@ -107,6 +110,7 @@ public:
 
 protected:
     t_httpUpdate_return handleUpdate(HTTPClient& http, const String& currentVersion, bool spiffs = false);
+    t_httpUpdate_return handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, char * pubKey, bool spiffs = false);
     bool runUpdate(Stream& in, uint32_t size, String md5, int command = U_FLASH);
 
     // Set the error and potentially use a CB to notify the application

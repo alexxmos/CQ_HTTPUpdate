@@ -58,7 +58,7 @@ HTTPUpdateResult HTTPUpdate::update(Client& client, const String& url, const Str
     return handleUpdate(http, currentVersion, false);
 }
 
-HTTPUpdateResult HTTPUpdate::updateSignedFw(Client& client, const String& url, char * pubKey, const String& currentVersion)
+HTTPUpdateResult HTTPUpdate::updateSignedFw(Client& client, const String& url, const char *pubKey, const String& currentVersion)
 {
     HTTPClient http;
     if(!http.begin(client, url))
@@ -397,7 +397,7 @@ HTTPUpdateResult HTTPUpdate::handleUpdate(HTTPClient& http, const String& curren
     return ret;
 }
 
-HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, char * pubKey, bool spiffs)
+HTTPUpdateResult HTTPUpdate::handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, const char *pubKey, bool spiffs)
 {
     HTTPUpdateResult ret = HTTP_UPDATE_FAILED;
 

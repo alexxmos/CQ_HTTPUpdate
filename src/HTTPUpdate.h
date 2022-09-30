@@ -87,7 +87,7 @@ public:
 
     t_httpUpdate_return update(Client& client, const String& url, const String& currentVersion = "");
 
-    t_httpUpdate_return updateSignedFw(Client& client, const String& url, char * pubKey, const String& currentVersion = "");
+    t_httpUpdate_return updateSignedFw(Client& client, const String& url, const char *pubKey, const String& currentVersion = "");
 
     t_httpUpdate_return update(Client& client, const String& host, uint16_t port, const String& uri = "/",
                                const String& currentVersion = "");
@@ -110,7 +110,7 @@ public:
 
 protected:
     t_httpUpdate_return handleUpdate(HTTPClient& http, const String& currentVersion, bool spiffs = false);
-    t_httpUpdate_return handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, char * pubKey, bool spiffs = false);
+    t_httpUpdate_return handleUpdateSignedFw(HTTPClient& http, const String& currentVersion, const char *pubKey, bool spiffs = false);
     bool runUpdate(Stream& in, uint32_t size, String md5, int command = U_FLASH);
 
     // Set the error and potentially use a CB to notify the application
